@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 中文命名实体识别系统 (Chinese NER System)
 
 基于 BiLSTM+CRF 模型的中文命名实体识别系统，支持16种实体类型识别，并集成AI增强功能。
@@ -160,3 +161,7 @@ git push -u origin main
 ## 许可证
 
 MIT License
+=======
+# MingMingTiShiBie
+工程实践4
+>>>>>>> a5e93edd45360a693b92ab72b6fc5cb0a6fecac8
