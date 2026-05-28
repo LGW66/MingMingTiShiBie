@@ -1,7 +1,10 @@
 import os
 import json
 import re
-import httpx
+try:
+    import httpx
+except ImportError:
+    httpx = None
 from typing import List, Dict, Tuple, Optional
 
 class AINerInterface:
@@ -25,7 +28,7 @@ class AINerInterface:
             return base_entities
 
     def _build_prompt(self, text: str, entities: List[Tuple[str, str]]) -> str:
-        entity_str = "\n".join([f"- {ent_type}: {entity}" for entity, ent_type in entities])
+        entity_str = "\n".join([f"- {ent_type}: {entity}" for ent_type, entity in entities])
         return f"""你是一个专业的中文命名实体识别助手。给定以下文本和初步识别出的实体，请根据上下文语境判断并修正实体类型。
 
 文本: {text}
@@ -36,7 +39,7 @@ class AINerInterface:
 请根据语境分析每个实体的正确类型。可能的实体类型包括：
 - 人名（人名）：人物的真实姓名
 - 公司（公司）：公司、企业名称
-- 组织（组织）：正式组织、机构
+- 组织（组织）：正式组织、机构（如协会、学会、委员会等）
 - 地址（地址）：地点、地址
 - 书名（书名）：书籍名称
 - 游戏（游戏）：游戏名称
@@ -46,18 +49,24 @@ class AINerInterface:
 - 景点（景点）：旅游景点
 - 动物（动物）：动物名称
 - 植物（植物）：植物名称
-- 水果（水果）：水果名称
-- 食物（食物）：食物、食品
+- 食物（食物）：食物、食品（包括水果、蔬菜、零食、饮料等）
 - 品牌（品牌）：产品品牌名称
 - 产品（产品）：具体产品名称
+- 事件（事件）：会议、活动、赛事等（如人民代表大会、奥运会、亚运会等）
+- 时间（时间）：时刻、时段（如早上、下午、8点等）
+- 日期（日期）：具体日期（如今天、明天、2024年1月1日等）
+- 数字（数字）：数量、金额、序号等
 
-注意事项：
-1. 如果某个实体可能是多种类型，请根据上下文语境选择最合适的一种。
-2. 如果两个实体存在包含关系（如"苹果公司"包含"苹果"），只保留更完整的实体。
-3. 如果实体明显错误（如单个字"机"被识别为地址），请删除或修正它。
-4. "苹果手机"是产品，不是公司或水果。
-5. "苹果公司"是公司，"苹果"在商业语境下可能是品牌。
+重要语境规则：
+1. 如果实体是"苹果"、"香蕉"、"橙子"、"葡萄"、"西瓜"等常见水果，且文本中包含"吃"、"咬"、"品尝"、"水果"等词，应识别为"水果"。
+2. 如果实体是"苹果"、"香蕉"等，且文本中包含"公司"、"手机"、"电脑"、"科技"、"产品"等词，应识别为"公司"或"品牌"。
+3. "苹果手机"是产品，"苹果公司"是公司，单独的"苹果"需根据上下文判断。
+4. 如果两个实体存在包含关系（如"苹果公司"包含"苹果"），只保留更完整的实体。
+5. 如果实体明显错误（如单个字"机"被识别为地址），请删除或修正它。
 6. "人民大会堂"是地址/景点，不要拆分为"人民大会"。
+7. 在"吃"、"喝"、"烹饪"等动词后面的实体通常是食物或水果。
+8. "人民代表大会"、"党代会"、"奥运会"、"亚运会"、"世界杯"等是事件，不是组织。
+9. "发表讲话"、"召开"、"举行"等动词通常与事件相关。
 
 请以JSON格式输出修正后的实体列表，格式如下：
 {{
@@ -127,14 +136,16 @@ class AINerInterface:
                 data = json.loads(json_match.group())
                 entities = []
                 for item in data.get("refined_entities", []):
-                    entities.append((item["entity"], item["type"]))
+                    entities.append((item["type"], item["entity"]))
                 return entities
         except json.JSONDecodeError:
             pass
         return []
 
     async def refine_ner_async(self, text: str, base_entities: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-        if not base_entities or not self.api_key:
+        if not base_entities:
+            return base_entities
+        if self.model_type != "ollama" and not self.api_key:
             return base_entities
 
         prompt = self._build_prompt(text, base_entities)
@@ -186,10 +197,13 @@ class AINerConfig:
         "景点": "scene",
         "动物": "animal",
         "植物": "plant",
-        "水果": "fruit",
         "食物": "food",
         "品牌": "brand",
-        "产品": "product"
+        "产品": "product",
+        "事件": "event",
+        "时间": "time",
+        "日期": "date",
+        "数字": "number"
     }
 
     @classmethod

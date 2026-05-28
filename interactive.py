@@ -59,12 +59,61 @@ def get_chinese_entity_type(en_type):
     return EN_TO_CN.get(en_type, en_type)
 
 
+def context_based_type_correction(entities, text):
+    CONTEXT_KEYWORDS = {
+        'fruit': ['吃', '吃的', '吃了', '吃下', '咬', '品尝', '水果', '果汁', '水果摊', '水果店', '水果篮', '新鲜', '甜', '酸', '味道', '口感'],
+        'food': ['吃', '喝', '烹饪', '做饭', '餐厅', '饭', '菜', '汤', '肉', '蛋', '面', '米', '厨房', '餐具', '美味', '食谱'],
+        'animal': ['宠物', '猫', '狗', '鸟', '鱼', '动物园', '兽医', '毛茸茸', '可爱', '尾巴', '爪子', '叫声', '跑', '跳', '飞', '游'],
+        'plant': ['花', '草', '树', '叶子', '根', '茎', '花园', '植物', '盆栽', '种植', '浇水', '施肥', '发芽', '开花'],
+        'company': ['公司', '企业', '科技', '产品', '手机', '电脑', '软件', '互联网', '上市', '股票', 'CEO', '创始人', '总部'],
+        'brand': ['品牌', '牌子', '标志', '商标', '设计', '广告', '代言', '限量', '经典', '新款'],
+        'product': ['手机', '电脑', '平板', '手表', '耳机', '电视', '冰箱', '空调', '汽车', '型号'],
+    }
+    
+    entity_dict = {}
+    for entity_type, entity in entities:
+        if entity not in entity_dict:
+            entity_dict[entity] = []
+        if entity_type not in entity_dict[entity]:
+            entity_dict[entity].append(entity_type)
+    
+    corrected_entities = []
+    
+    for entity, types in entity_dict.items():
+        if len(types) == 1:
+            corrected_entities.append((types[0], entity))
+        else:
+            best_type = types[0]
+            max_score = 0
+            
+            for entity_type in types:
+                score = 0
+                if entity_type in CONTEXT_KEYWORDS:
+                    for keyword in CONTEXT_KEYWORDS[entity_type]:
+                        if keyword in text:
+                            score += 1
+                if entity_type == 'fruit' and entity in ['苹果', '香蕉', '橙子', '葡萄', '西瓜', '梨', '桃']:
+                    if any(action in text for action in ['吃', '吃的', '吃了', '吃下', '咬', '品尝']):
+                        score += 2
+                if entity_type == 'company' and entity in ['苹果', '谷歌', '微软', '华为', '阿里巴巴', '腾讯']:
+                    if any(tech in text for tech in ['公司', '科技', '手机', '电脑', '软件']):
+                        score += 2
+                if score > max_score:
+                    max_score = score
+                    best_type = entity_type
+            
+            corrected_entities.append((best_type, entity))
+    
+    return sorted(corrected_entities, key=lambda x: text.index(x[1]) if x[1] in text else -1)
+
+
 def main():
     print("=" * 60)
     print("    中文命名实体识别系统 v2.0 (BiLSTM+CRF + 知识库增强)")
     print("=" * 60)
     print("支持的实体类型：")
     print("  姓名、公司、组织、地址、书名、游戏、政府、电影、职位、景点")
+    print("  动物、植物、食物、品牌、产品、事件、时间、日期、数字")
     print("=" * 60)
     
     _, _, _, vocab, char_to_idx = get_dataloaders(BATCH_SIZE)
@@ -134,9 +183,11 @@ def main():
                     for t in types:
                         unique_entities.append((t, entity))
 
+            corrected_entities = context_based_type_correction(unique_entities, text)
+
             print("\n识别结果：")
-            if unique_entities:
-                for entity_type, entity in unique_entities:
+            if corrected_entities:
+                for entity_type, entity in corrected_entities:
                     cn_type = get_chinese_entity_type(entity_type)
                     print(f"  {cn_type}：{entity}")
             else:

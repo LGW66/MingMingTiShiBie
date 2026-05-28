@@ -80,6 +80,25 @@ def merge_entities(model_entities, knowledge_entities, text):
 
     return merged
 
+def add_all_possible_types(entities, text):
+    entity_dict = {}
+    for entity_type, entity in entities:
+        if entity not in entity_dict:
+            entity_dict[entity] = set()
+        entity_dict[entity].add(entity_type)
+
+    for entity in list(entity_dict.keys()):
+        for kb_type, kb_list in KNOWLEDGE_BASE.items():
+            if entity in kb_list and kb_type not in entity_dict[entity]:
+                entity_dict[entity].add(kb_type)
+
+    result = []
+    for entity, types in entity_dict.items():
+        for entity_type in types:
+            result.append((entity_type, entity))
+
+    return sorted(result, key=lambda x: text.index(x[1]) if x[1] in text else -1)
+
 def deduplicate_by_context(entities, text):
     entity_list = sorted(entities, key=lambda x: (-len(x[1]), text.index(x[1]) if x[1] in text else -1))
 
@@ -125,7 +144,7 @@ def main():
     print("=" * 60)
     print("支持的实体类型：")
     print("  姓名、公司、组织、地址、书名、游戏、政府、电影、职位、景点")
-    print("  动物、植物、水果、食物")
+    print("  动物、植物、食物、品牌、产品、事件、时间、日期、数字")
     print("=" * 60)
     print("\nAI模型选项：")
     print("  0 - 不使用AI增强（直接使用模型识别）")
@@ -204,6 +223,8 @@ def main():
             knowledge_entities = knowledge_based_ner(text)
 
             merged_entities = merge_entities(model_entities, knowledge_entities, text)
+
+            merged_entities = add_all_possible_types(merged_entities, text)
 
             merged_entities = remove_invalid_single_chars(merged_entities, text)
 
