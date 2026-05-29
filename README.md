@@ -86,29 +86,6 @@ iwr https://ollama.ai/install.sh | sh
 ollama pull qwen2.5:latest
 ```
 
-## 项目结构
-
-```
-.
-├── data/                    # 训练数据
-│   ├── train_new.json       # 训练集
-│   ├── dev_new.json         # 验证集
-│   └── test.json            # 测试集
-├── models/                  # 模型文件
-│   ├── best_model.pt        # 最佳模型
-│   ├── last_checkpoint.pt   # 最后检查点
-│   └── vocab.pkl            # 词汇表
-├── ai_ner.py                # AI增强模块
-├── config.py                # 配置文件（实体类型、知识库等）
-├── data_utils.py            # 数据处理工具
-├── interactive.py           # 基础交互界面
-├── interactive_ai.py        # AI增强交互界面
-├── model.py                 # BiLSTM+CRF模型
-├── requirements.txt         # 依赖列表
-├── test.py                  # 测试脚本
-└── train.py                 # 训练脚本
-```
-
 ## 使用示例
 
 ```
@@ -129,37 +106,6 @@ ollama pull qwen2.5:latest
    日期：明天
    时间：早上
    时间：8点
-```
-
-## 上传到GitHub步骤
-
-1. **初始化Git仓库**
-```bash
-cd d:\TRAxiangmu\gcsj
-git init
-git lfs install
-git lfs track "models/*.pt"
-git lfs track "models/*.pkl"
-```
-
-2. **添加文件**
-```bash
-git add .
-```
-
-3. **提交**
-```bash
-git commit -m "Add Chinese NER System with 18 entity types and AI enhancement"
-```
-
-4. **连接远程仓库**
-```bash
-git remote add origin https://github.com/LGW66/MingMingTiShiBie.git
-```
-
-5. **推送到GitHub**
-```bash
-git push -u origin main
 ```
 
 ## 许可证

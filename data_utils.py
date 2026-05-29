@@ -30,6 +30,9 @@ def convert_to_bio(data):
             for entity_name, spans in entities.items():
                 for span in spans:
                     start, end = span
+                    # 添加边界检查，防止索引越界
+                    if start < 0 or end >= len(text):
+                        continue
                     for i in range(start, end + 1):
                         if i == start:
                             bio_labels[i] = f'B-{entity_type}'
@@ -91,8 +94,8 @@ def collate_fn(batch):
 
 
 def get_dataloaders(batch_size=32):
-    train_data = load_json('train.json')
-    dev_data = load_json('dev.json')
+    train_data = load_json('train_new.json')
+    dev_data = load_json('dev_new.json')
     test_data = load_json('test.json')
     
     train_bio = convert_to_bio(train_data)
