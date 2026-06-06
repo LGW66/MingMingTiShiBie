@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+.env
+.venv/
+
+# Model files (uncomment if you want to exclude large model files)
+# models/*.pt
+# models/*.pkl
+# bert_cache/
+
+# Data (optional - if large, but keep for training reproducibility)
+data/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Git
+.git/
+
+# Test files (optional - comment out if you want to keep tests)
+# test.py
+# test_*.py
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
