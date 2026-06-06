@@ -14,12 +14,12 @@ env/
 .env
 .venv/
 
-# Model files (uncomment if you want to exclude large model files)
-# models/*.pt
-# models/*.pkl
-# bert_cache/
+# Model files - exclude large model files to reduce repo size
+models/*.pt
+models/*.pkl
+bert_cache/
 
-# Data (optional - if large, but keep for training reproducibility)
+# Data - exclude large training data files
 data/
 
 # Logs
