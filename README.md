@@ -1,33 +1,68 @@
 # 中文命名实体识别系统 (Chinese NER System)
 
-基于BERT模型的中文命名实体识别系统，支持AI增强识别和联网搜索功能。
+基于BERT模型的中文命名实体识别系统，支持AI语义推理增强。
 
 ## 功能特性
 
 - ✅ **BERT模型**：基于BERT-base-chinese的高性能命名实体识别
-- ✅ **AI增强**：支持Ollama本地模型、DeepSeek API、OpenAI API进行实体类型修正
-- ✅ **联网搜索**：集成DuckDuckGo搜索，提高实体识别准确性
+- ✅ **AI增强**：支持Ollama本地模型进行语义推理和上下文判断
+- ✅ **知识库增强**：包含5000+实体，覆盖19种实体类型
 - ✅ **长篇文档处理**：支持句子分割、逐句识别、结果整合
 - ✅ **多格式支持**：支持txt、md、docx文档上传识别
 - ✅ **前后端分离**：FastAPI后端 + 现代化前端界面
-- ✅ **19种实体类型**：姓名、公司、品牌、产品、地址、组织、政府、职位、景点、书名、电影、游戏、动物、植物、食物、事件、时间、日期、数字
+- ✅ **19种实体类型**：姓名、公司，品牌、产品、地址、组织，政府、职位、景点、书名、电影、游戏、动物、植物、食物、事件、时间、日期、数字
 
 ## 技术栈
 
 - **后端**：FastAPI + PyTorch + BERT
 - **前端**：HTML5 + CSS3 + JavaScript
-- **AI集成**：Ollama / DeepSeek API / OpenAI API
-- **联网搜索**：DuckDuckGo Search
+- **AI集成**：Ollama (本地模型)
+- **模型**：bert-base-chinese
 
 ## 快速开始
 
-### 安装依赖
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/LGW66/MingMingTiShiBie.git
+cd MingMingTiShiBie
+```
+
+### 2. 下载模型和数据
+
+由于GitHub对文件大小有限制，你需要手动下载以下文件：
+
+#### BERT模型和Tokenizer
+从HuggingFace下载bert-base-chinese模型到 `bert_cache/` 目录：
+```bash
+mkdir -p bert_cache
+# 使用Python下载
+python -c "from transformers import BertModel, AutoTokenizer; \
+    m = BertModel.from_pretrained('bert-base-chinese'); \
+    t = AutoTokenizer.from_pretrained('bert-base-chinese'); \
+    m.save_pretrained('./bert_cache'); \
+    t.save_pretrained('./bert_cache')"
+```
+
+#### 训练好的模型（可选）
+将训练好的模型文件放到 `models/` 目录：
+- `models/best_model.pt` - 最佳模型检查点
+- `models/last_checkpoint.pt` - 最后检查点
+- `models/vocab.pkl` - 词汇表
+
+#### 训练数据（可选）
+将训练数据放到 `data/` 目录：
+- `data/train_new_extended.json` - 训练集
+- `data/dev_new.json` - 验证集
+- `data/test.json` - 测试集
+
+### 3. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 启动服务
+### 4. 启动服务
 
 ```bash
 python app.py
@@ -35,7 +70,7 @@ python app.py
 
 服务将在 `http://127.0.0.1:8081` 启动。
 
-### 访问界面
+### 5. 访问界面
 
 打开浏览器访问 `http://127.0.0.1:8081` 即可使用。
 
@@ -50,16 +85,14 @@ python app.py
 {
     "text": "待识别的文本",
     "use_ai": false,
-    "is_document": false,
-    "use_search": false
+    "is_document": false
 }
 ```
 
 **参数说明**:
 - `text`: 待识别的文本内容
-- `use_ai`: 是否使用AI增强（需配置Ollama或API密钥）
+- `use_ai`: 是否使用AI增强
 - `is_document`: 是否为长篇文档模式
-- `use_search`: 是否启用联网搜索（需配合use_ai使用）
 
 **响应**:
 ```json
@@ -68,7 +101,7 @@ python app.py
         {
             "type": "name",
             "type_cn": "姓名",
-            "value": "李白"
+            "value": "马云"
         }
     ],
     "used_ai": false,
@@ -84,38 +117,24 @@ python app.py
 **请求**:
 - `file`: 文档文件（支持txt、md、docx）
 - `use_ai`: 是否使用AI增强
-- `ai_model`: AI模型类型（ollama/deepseek/openai）
+- `ai_model`: AI模型类型（ollama）
 
-## 配置说明
+## AI增强功能配置
 
-### AI模型配置
-
-#### 使用Ollama本地模型（推荐）
+### 使用Ollama本地模型（推荐）
 
 1. 安装Ollama：https://ollama.com/
 2. 拉取模型：`ollama pull qwen2.5`
 3. 启动Ollama服务：`ollama serve`
 
-#### 使用DeepSeek API
-
-设置环境变量：
-```bash
-export DEEPSEEK_API_KEY=your_api_key
-```
-
-#### 使用OpenAI API
-
-设置环境变量：
-```bash
-export OPENAI_API_KEY=your_api_key
-```
+AI增强功能会使用本地模型进行语义推理，提高实体识别的准确性。
 
 ## 项目结构
 
 ```
-MingMingTiShiBie-main/
+MingMingTiShiBie/
 ├── app.py              # FastAPI主应用
-├── ai_ner.py           # AI增强模块
+├── ai_ner.py           # AI增强模块（语义推理）
 ├── config.py           # 配置文件
 ├── model.py            # BERT模型定义
 ├── data_utils.py       # 数据处理工具
@@ -123,8 +142,9 @@ MingMingTiShiBie-main/
 ├── requirements.txt    # 依赖列表
 ├── static/             # 静态资源
 │   └── index.html      # 前端界面
-├── models/             # 模型文件目录
-└── data/               # 数据集目录
+├── bert_cache/         # BERT模型和Tokenizer（需手动下载）
+├── models/             # 训练好的模型（可选）
+└── data/              # 数据集（可选）
 ```
 
 ## 实体类型
@@ -150,6 +170,17 @@ MingMingTiShiBie-main/
 | time | 时间 | 时刻、时段 |
 | date | 日期 | 具体日期 |
 | number | 数字 | 数量、金额、序号 |
+
+## 训练自己的模型
+
+如果你想训练自己的模型：
+
+1. 准备训练数据（JSON格式）
+2. 修改 `config.py` 中的配置
+3. 运行训练脚本：
+```bash
+python train.py
+```
 
 ## 许可证
 
