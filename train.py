@@ -2,11 +2,11 @@ import os
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-import pickle
+from transformers import get_linear_schedule_with_warmup
 
 from config import *
 from data_utils import get_dataloaders
-from model import BiLSTM_CRF
+from model import BertNER
 
 
 def compute_metrics(predictions, labels, masks, id_to_label):
@@ -68,7 +68,7 @@ def compute_metrics(predictions, labels, masks, id_to_label):
     return precision, recall, f1, micro_f1
 
 
-def train(model, train_loader, dev_loader, optimizer, device, epochs, patience, model_dir):
+def train(model, train_loader, dev_loader, optimizer, scheduler, device, epochs, patience, model_dir):
     best_f1 = 0.0
     patience_counter = 0
     
@@ -77,18 +77,24 @@ def train(model, train_loader, dev_loader, optimizer, device, epochs, patience, 
         total_loss = 0.0
         
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")
-        for char_ids, label_ids, masks in progress_bar:
-            char_ids = char_ids.to(device)
-            label_ids = label_ids.to(device)
-            masks = masks.to(device)
+        for batch in progress_bar:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            token_type_ids = batch['token_type_ids'].to(device)
+            labels = batch['labels'].to(device)
             
             optimizer.zero_grad()
             
-            emissions = model(char_ids, masks)
-            loss = model.compute_loss(emissions, label_ids, masks)
+            loss, _ = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                labels=labels
+            )
             
             loss.backward()
             optimizer.step()
+            scheduler.step()
             
             total_loss += loss.item()
             progress_bar.set_postfix({'loss': loss.item()})
@@ -102,16 +108,21 @@ def train(model, train_loader, dev_loader, optimizer, device, epochs, patience, 
         all_masks = []
         
         with torch.no_grad():
-            for char_ids, label_ids, masks in dev_loader:
-                char_ids = char_ids.to(device)
-                label_ids = label_ids.to(device)
-                masks = masks.to(device)
+            for batch in dev_loader:
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+                token_type_ids = batch['token_type_ids'].to(device)
+                labels = batch['labels'].to(device)
                 
-                predictions = model.predict(char_ids, masks)
+                predictions = model.predict(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids
+                )
                 
-                all_predictions.extend(predictions)
-                all_labels.extend(label_ids.cpu().numpy().tolist())
-                all_masks.extend(masks.cpu().numpy().tolist())
+                all_predictions.extend(predictions.cpu().numpy().tolist())
+                all_labels.extend(labels.cpu().numpy().tolist())
+                all_masks.extend(attention_mask.cpu().numpy().tolist())
         
         _, _, f1, micro_f1 = compute_metrics(all_predictions, all_labels, all_masks, ID_TO_LABEL)
         print(f"Dev Micro F1: {micro_f1:.4f}")
@@ -140,20 +151,21 @@ def train(model, train_loader, dev_loader, optimizer, device, epochs, patience, 
 def main():
     os.makedirs(MODEL_DIR, exist_ok=True)
     
-    train_loader, dev_loader, test_loader, vocab, char_to_idx = get_dataloaders(BATCH_SIZE)
+    train_loader, dev_loader, test_loader, tokenizer = get_dataloaders(BATCH_SIZE, MAX_LEN)
     
-    vocab_size = len(vocab)
-    
-    model = BiLSTM_CRF(
-        vocab_size=vocab_size,
-        embedding_dim=EMBEDDING_DIM,
-        hidden_dim=HIDDEN_DIM,
+    model = BertNER(
         num_labels=NUM_LABELS,
-        num_layers=NUM_LAYERS,
-        dropout=DROPOUT
+        model_name=BERT_MODEL_NAME
     ).to(DEVICE)
     
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    
+    total_steps = len(train_loader) * EPOCHS
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=0,
+        num_training_steps=total_steps
+    )
     
     start_epoch = 0
     best_f1 = 0.0
@@ -167,7 +179,7 @@ def main():
         best_f1 = checkpoint['best_f1']
         print(f"Resuming training from epoch {start_epoch}, best F1: {best_f1:.4f}")
     
-    train(model, train_loader, dev_loader, optimizer, DEVICE, EPOCHS, PATIENCE, MODEL_DIR)
+    train(model, train_loader, dev_loader, optimizer, scheduler, DEVICE, EPOCHS, PATIENCE, MODEL_DIR)
 
 
 if __name__ == '__main__':

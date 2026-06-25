@@ -135,18 +135,34 @@ def predict_single_sentence(text: str) -> List[Tuple[str, str]]:
     
     return processed_entities
 
-def knowledge_based_ner(text: str) -> List[Tuple[str, str]]:
+def knowledge_based_ner(text: str) -> List[Tuple[str, str, int]]:
     entities = []
     
     for entity_type, entity_list in KNOWLEDGE_BASE.items():
         for entity in entity_list:
-            if len(entity) >= 2 and entity in text:
-                entities.append((entity_type, entity))
+            if len(entity) >= 2:
+                start = 0
+                while True:
+                    idx = text.find(entity, start)
+                    if idx == -1:
+                        break
+                    entities.append((entity_type, entity, idx))
+                    start = idx + len(entity)
             elif len(entity) == 1 and entity in text:
-                if entity in ['狗', '猫', '花', '草', '树', '鱼', '鸟', '虫']:
-                    entities.append((entity_type, entity))
+                if entity in ['狗', '猫', '花', '草', '树', '鱼', '鸟', '虫', '梨', '桃', '杏', '枣', '瓜', '橘', '橙', '梅', '李', '栗', '豆', '米', '面', '肉', '茶', '酒', '糖', '盐', '油']:
+                    start = 0
+                    while True:
+                        idx = text.find(entity, start)
+                        if idx == -1:
+                            break
+                        entities.append((entity_type, entity, idx))
+                        start = idx + 1
     
-    entities.extend(extract_dates(text))
+    date_entities = extract_dates(text)
+    for entity_type, entity in date_entities:
+        idx = text.find(entity)
+        if idx != -1:
+            entities.append((entity_type, entity, idx))
     
     return entities
 
@@ -172,10 +188,10 @@ def extract_dates(text: str) -> List[Tuple[str, str]]:
 def remove_invalid_single_chars(entities, text):
     filtered = []
     invalid_chars = ['的', '在', '是', '了', '和', '与', '或', '都', '也', '很', '把', '被', '让', '给', '用', '对', '这', '那', '你', '我', '他', '她', '它', '们', '有', '没', '要', '能', '会', '可', '以', '说', '看', '想', '知', '道', '来', '去', '进', '出', '上', '下', '左', '右', '前', '后', '里', '外', '大', '小', '多', '少', '好', '坏', '新', '旧', '高', '低', '长', '短', '快', '慢', '轻', '重', '冷', '热', '南', '北', '东', '西', '机', '话', '号', '本', '为', '于', '从', '当', '其', '此', '每', '各', '所']
-    for entity_type, entity in entities:
+    for entity_type, entity, pos in entities:
         if len(entity) == 1 and entity in invalid_chars:
             continue
-        filtered.append((entity_type, entity))
+        filtered.append((entity_type, entity, pos))
     return filtered
 
 def context_based_filter(entities, text):
@@ -184,34 +200,41 @@ def context_based_filter(entities, text):
         '华为': ['升华'],
     }
     
-    for entity_type, entity in entities:
+    for entity_type, entity, pos in entities:
         should_filter = False
         
         if entity in blacklist_contexts:
             for context in blacklist_contexts[entity]:
                 if context in text:
-                    index = text.find(entity)
                     context_index = text.find(context)
-                    if context_index >= 0 and abs(index - context_index) <= 2:
+                    if context_index >= 0 and abs(pos - context_index) <= 2:
                         should_filter = True
                         break
         
         if not should_filter:
-            filtered.append((entity_type, entity))
+            filtered.append((entity_type, entity, pos))
     
     return filtered
 
 def merge_entities(model_entities, knowledge_entities, text):
     merged = []
-    seen = set()
+    seen_positions = set()
     
-    all_entities = model_entities + knowledge_entities
-    all_entities = sorted(all_entities, key=lambda x: text.index(x[1]) if x[1] in text else -1)
+    model_with_pos = [(typ, ent, text.index(ent)) for typ, ent in model_entities if ent in text]
+    all_entities = model_with_pos + knowledge_entities
+    all_entities = sorted(all_entities, key=lambda x: (x[2], -len(x[1])))
     
-    for entity_type, entity in all_entities:
-        if entity not in seen:
-            merged.append((entity_type, entity))
-            seen.add(entity)
+    for entity_type, entity, pos in all_entities:
+        is_blocked = False
+        for i in range(pos, pos + len(entity)):
+            if i in seen_positions:
+                is_blocked = True
+                break
+        
+        if not is_blocked:
+            merged.append((entity_type, entity, pos))
+            for i in range(pos, pos + len(entity)):
+                seen_positions.add(i)
     
     return merged
 
@@ -234,32 +257,53 @@ def add_all_possible_types(entities, text):
     
     return sorted(result, key=lambda x: text.index(x[1]) if x[1] in text else -1)
 
+def find_all_occurrences(text, substring):
+    indices = []
+    start = 0
+    while True:
+        index = text.find(substring, start)
+        if index == -1:
+            break
+        indices.append(index)
+        start = index + 1
+    return indices
+
 def deduplicate_by_context(entities, text):
-    entity_list = sorted(entities, key=lambda x: (-len(x[1]), text.index(x[1]) if x[1] in text else -1))
+    entity_list = sorted(entities, key=lambda x: (-len(x[1]), x[2]))
     
     filtered = []
-    for entity_type, entity in entity_list:
-        is_substring = False
-        for _, existing_entity in filtered:
-            if entity in existing_entity and entity != existing_entity:
-                is_substring = True
-                break
-        if not is_substring:
-            filtered.append((entity_type, entity))
+    used_positions = set()
     
-    entity_dict = {}
-    for entity_type, entity in filtered:
-        if entity not in entity_dict:
-            entity_dict[entity] = []
-        if entity_type not in entity_dict[entity]:
-            entity_dict[entity].append(entity_type)
+    for entity_type, entity, pos in entity_list:
+        should_filter = False
+        
+        entity_positions = set(range(pos, pos + len(entity)))
+        overlap = False
+        for p in entity_positions:
+            if p in used_positions:
+                overlap = True
+                break
+        
+        if overlap:
+            continue
+        
+        for _, existing_entity, existing_pos in filtered:
+            if existing_entity and entity in existing_entity and entity != existing_entity:
+                if pos >= existing_pos and pos <= existing_pos + len(existing_entity) - len(entity):
+                    should_filter = True
+                    break
+        
+        if not should_filter:
+            filtered.append((entity_type, entity, pos))
+            for p in entity_positions:
+                used_positions.add(p)
+    
+    filtered = sorted(filtered, key=lambda x: x[2])
     
     result = []
-    for entity, types in entity_dict.items():
-        for t in types:
-            result.append((t, entity))
+    for entity_type, entity, pos in filtered:
+        result.append((entity_type, entity, pos))
     
-    result = sorted(result, key=lambda x: text.index(x[1]) if x[1] in text else -1)
     return result
 
 class NERRequest(BaseModel):
@@ -304,17 +348,20 @@ async def recognize_entities(request: NERRequest):
         if request.is_document:
             sentences = split_into_sentences(text)
             all_entities = []
+            current_pos = 0
             
             for sentence in sentences:
                 model_entities = predict_single_sentence(sentence)
                 knowledge_entities = knowledge_based_ner(sentence)
                 
                 merged_entities = merge_entities(model_entities, knowledge_entities, sentence)
-                merged_entities = add_all_possible_types(merged_entities, sentence)
                 merged_entities = remove_invalid_single_chars(merged_entities, sentence)
                 merged_entities = context_based_filter(merged_entities, sentence)
                 
+                merged_entities = [(ent_type, ent, pos + current_pos) for ent_type, ent, pos in merged_entities]
+                
                 all_entities.extend(merged_entities)
+                current_pos += len(sentence)
             
             final_entities = deduplicate_by_context(all_entities, text)
             processed_sentences = len(sentences)
@@ -330,9 +377,6 @@ async def recognize_entities(request: NERRequest):
             merged_entities = merge_entities(model_entities, knowledge_entities, text)
             print(f"[DEBUG] 合并后: {len(merged_entities)} 个 - {merged_entities}")
             
-            merged_entities = add_all_possible_types(merged_entities, text)
-            print(f"[DEBUG] 添加类型后: {len(merged_entities)} 个")
-            
             merged_entities = remove_invalid_single_chars(merged_entities, text)
             print(f"[DEBUG] 移除单字后: {len(merged_entities)} 个")
             
@@ -344,10 +388,10 @@ async def recognize_entities(request: NERRequest):
         
         if request.use_ai:
             ai_interface = AINerInterface()
-            final_entities = await ai_interface.refine_ner_async(text, final_entities)
+            final_entities = ai_interface.refine_ner_with_pos(text, final_entities)
         
         formatted_entities = []
-        for entity_type, entity_value in final_entities:
+        for entity_type, entity_value, _ in final_entities:
             formatted_entities.append(Entity(
                 type=entity_type,
                 type_cn=EN_TO_CN.get(entity_type, entity_type),
@@ -375,41 +419,53 @@ async def test_endpoint():
 async def recognize_file(file: UploadFile = File(...), use_ai: Optional[bool] = False, ai_model: Optional[str] = "ollama"):
     try:
         content = await file.read()
-        text = content.decode('utf-8')
+        filename = file.filename or ''
+        
+        if filename.lower().endswith('.docx'):
+            from io import BytesIO
+            from docx import Document
+            doc = Document(BytesIO(content))
+            text = '\n'.join([para.text for para in doc.paragraphs])
+        else:
+            text = content.decode('utf-8')
         
         sentences = split_into_sentences(text)
         all_entities = []
+        current_pos = 0
         
         for sentence in sentences:
             model_entities = predict_single_sentence(sentence)
             knowledge_entities = knowledge_based_ner(sentence)
             
             merged_entities = merge_entities(model_entities, knowledge_entities, sentence)
-            merged_entities = add_all_possible_types(merged_entities, sentence)
             merged_entities = remove_invalid_single_chars(merged_entities, sentence)
             
+            merged_entities = [(ent_type, ent, pos + current_pos) for ent_type, ent, pos in merged_entities]
+            
             all_entities.extend(merged_entities)
+            current_pos += len(sentence)
         
         final_entities = deduplicate_by_context(all_entities, text)
         
         if use_ai:
             ai_interface = AINerInterface(ai_model)
-            final_entities = await ai_interface.refine_ner_async(text, final_entities)
+            final_entities = ai_interface.refine_ner_with_pos(text, final_entities)
         
         formatted_entities = []
-        for entity_type, entity_value in final_entities:
+        for entity_type, entity_value, _ in final_entities:
             formatted_entities.append(Entity(
                 type=entity_type,
                 type_cn=EN_TO_CN.get(entity_type, entity_type),
                 value=entity_value
             ))
         
-        return NERResponse(
-            entities=formatted_entities,
-            used_ai=use_ai,
-            total_count=len(formatted_entities),
-            processed_sentences=len(sentences)
-        )
+        return {
+            "entities": formatted_entities,
+            "used_ai": use_ai,
+            "total_count": len(formatted_entities),
+            "processed_sentences": len(sentences),
+            "text": text
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

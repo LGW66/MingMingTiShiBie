@@ -1,10 +1,9 @@
 import os
 import torch
-import pickle
 
 from config import *
 from data_utils import get_dataloaders
-from model import BiLSTM_CRF
+from model import BertNER
 from train import compute_metrics
 
 
@@ -15,16 +14,21 @@ def test(model, test_loader, device, id_to_label):
     all_masks = []
     
     with torch.no_grad():
-        for char_ids, label_ids, masks in test_loader:
-            char_ids = char_ids.to(device)
-            label_ids = label_ids.to(device)
-            masks = masks.to(device)
+        for batch in test_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            token_type_ids = batch['token_type_ids'].to(device)
+            labels = batch['labels'].to(device)
             
-            predictions = model.predict(char_ids, masks)
+            predictions = model.predict(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids
+            )
             
-            all_predictions.extend(predictions)
-            all_labels.extend(label_ids.cpu().numpy().tolist())
-            all_masks.extend(masks.cpu().numpy().tolist())
+            all_predictions.extend(predictions.cpu().numpy().tolist())
+            all_labels.extend(labels.cpu().numpy().tolist())
+            all_masks.extend(attention_mask.cpu().numpy().tolist())
     
     precision, recall, f1, micro_f1 = compute_metrics(all_predictions, all_labels, all_masks, id_to_label)
     
@@ -37,27 +41,32 @@ def test(model, test_loader, device, id_to_label):
     return micro_f1
 
 
-def predict_single_sentence(model, text, char_to_idx, id_to_label, device):
-    char_ids = [char_to_idx.get(c, char_to_idx['<UNK>']) for c in text]
-    char_ids = torch.tensor(char_ids, dtype=torch.long).unsqueeze(0).to(device)
-    mask = torch.ones(len(text), dtype=torch.bool).unsqueeze(0).to(device)
+def predict_single_sentence(model, text, tokenizer, label_map, id_to_label, device):
+    tokens = tokenizer.tokenize(text)
+    input_ids = tokenizer.convert_tokens_to_ids(['[CLS]'] + tokens + ['[SEP]'])
+    attention_mask = [1] * len(input_ids)
+    token_type_ids = [0] * len(input_ids)
     
-    predictions = model.predict(char_ids, mask)
+    input_ids = torch.tensor(input_ids, dtype=torch.long).unsqueeze(0).to(device)
+    attention_mask = torch.tensor(attention_mask, dtype=torch.long).unsqueeze(0).to(device)
+    token_type_ids = torch.tensor(token_type_ids, dtype=torch.long).unsqueeze(0).to(device)
+    
+    predictions = model.predict(input_ids, attention_mask, token_type_ids)
     
     entities = []
     current_entity = []
     current_type = None
     
-    for char, pred in zip(text, predictions[0]):
+    for token, pred in zip(tokens, predictions[0][1:-1]):
         label = id_to_label[pred]
         
         if label.startswith('B-'):
             if current_entity:
                 entities.append((current_type, ''.join(current_entity)))
-            current_entity = [char]
+            current_entity = [token]
             current_type = label[2:]
         elif label.startswith('I-') and current_entity:
-            current_entity.append(char)
+            current_entity.append(token)
         else:
             if current_entity:
                 entities.append((current_type, ''.join(current_entity)))
@@ -75,17 +84,11 @@ def get_chinese_entity_type(en_type):
 
 
 def main():
-    _, _, test_loader, vocab, char_to_idx = get_dataloaders(BATCH_SIZE)
+    train_loader, dev_loader, test_loader, tokenizer = get_dataloaders(BATCH_SIZE, MAX_LEN)
     
-    vocab_size = len(vocab)
-    
-    model = BiLSTM_CRF(
-        vocab_size=vocab_size,
-        embedding_dim=EMBEDDING_DIM,
-        hidden_dim=HIDDEN_DIM,
+    model = BertNER(
         num_labels=NUM_LABELS,
-        num_layers=NUM_LAYERS,
-        dropout=DROPOUT
+        model_name=BERT_MODEL_NAME
     ).to(DEVICE)
     
     best_model_path = os.path.join(MODEL_DIR, 'best_model.pt')
@@ -107,7 +110,7 @@ def main():
     ]
     
     for sentence in test_sentences:
-        entities = predict_single_sentence(model, sentence, char_to_idx, ID_TO_LABEL, DEVICE)
+        entities = predict_single_sentence(model, sentence, tokenizer, LABEL_MAP, ID_TO_LABEL, DEVICE)
         print(f"\nSentence: {sentence}")
         print("Entities:")
         for entity_type, entity in entities:

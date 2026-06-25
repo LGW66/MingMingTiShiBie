@@ -882,41 +882,67 @@
             return result;
         }
 
+        function findAllOccurrences(text, substring) {
+            const indices = [];
+            let start = 0;
+            while (true) {
+                const index = text.indexOf(substring, start);
+                if (index === -1) break;
+                indices.push(index);
+                start = index + 1;
+            }
+            return indices;
+        }
+
         function deduplicateByContext(entities, text) {
             const sortedEntities = [...entities].sort((a, b) => b.value.length - a.value.length);
             
             const filtered = [];
+            const usedPositions = new Set();
+            
             for (const entity of sortedEntities) {
-                let isSubstring = false;
-                for (const existing of filtered) {
-                    if (entity.value.includes(existing.value) && entity.value !== existing.value) {
-                        isSubstring = true;
+                const pos = entity.pos !== undefined ? entity.pos : text.indexOf(entity.value);
+                if (pos === -1) continue;
+                
+                const entityPositions = new Set();
+                for (let i = pos; i < pos + entity.value.length; i++) {
+                    entityPositions.add(i);
+                }
+                
+                let overlap = false;
+                for (const p of entityPositions) {
+                    if (usedPositions.has(p)) {
+                        overlap = true;
                         break;
                     }
                 }
-                if (!isSubstring) {
+                
+                if (overlap) continue;
+                
+                let shouldFilter = false;
+                for (const existing of filtered) {
+                    if (existing.value.includes(entity.value) && existing.value !== entity.value) {
+                        const existingPos = existing.pos !== undefined ? existing.pos : text.indexOf(existing.value);
+                        if (pos >= existingPos && pos <= existingPos + existing.value.length - entity.value.length) {
+                            shouldFilter = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!shouldFilter) {
                     filtered.push(entity);
+                    for (const p of entityPositions) {
+                        usedPositions.add(p);
+                    }
                 }
             }
-
-            const entityDict = {};
-            for (const entity of filtered) {
-                if (!entityDict[entity.value]) {
-                    entityDict[entity.value] = [];
-                }
-                if (!entityDict[entity.value].includes(entity.type)) {
-                    entityDict[entity.value].push(entity.type);
-                }
-            }
-
-            const result = [];
-            for (const [entity, types] of Object.entries(entityDict)) {
-                for (const t of types) {
-                    result.push({ type: t, type_cn: entityTypeNames[t] || t, value: entity });
-                }
-            }
-
-            return result.sort((a, b) => text.indexOf(a.value) - text.indexOf(b.value));
+            
+            return filtered.sort((a, b) => {
+                const posA = a.pos !== undefined ? a.pos : text.indexOf(a.value);
+                const posB = b.pos !== undefined ? b.pos : text.indexOf(b.value);
+                return posA - posB;
+            });
         }
 
         function knowledgeBasedNer(text) {
@@ -924,28 +950,29 @@
             
             for (const [entityType, entityList] of Object.entries(knowledgeBase)) {
                 for (const entity of entityList) {
-                    if (entity.length >= 2 && text.includes(entity)) {
-                        entities.push({ type: entityType, type_cn: entityTypeNames[entityType] || entityType, value: entity });
-                    } else if (entity.length === 1 && text.includes(entity)) {
+                    if (entity.length >= 2) {
+                        let start = 0;
+                        while (true) {
+                            const idx = text.indexOf(entity, start);
+                            if (idx === -1) break;
+                            entities.push({ type: entityType, type_cn: entityTypeNames[entityType] || entityType, value: entity, pos: idx });
+                            start = idx + entity.length;
+                        }
+                    } else if (entity.length === 1) {
                         if (['狗', '猫', '花', '草', '树', '鱼', '鸟', '虫', '米', '面', '肉', '茶', '酒', '糖', '盐', '油'].includes(entity)) {
-                            entities.push({ type: entityType, type_cn: entityTypeNames[entityType] || entityType, value: entity });
+                            let start = 0;
+                            while (true) {
+                                const idx = text.indexOf(entity, start);
+                                if (idx === -1) break;
+                                entities.push({ type: entityType, type_cn: entityTypeNames[entityType] || entityType, value: entity, pos: idx });
+                                start = idx + 1;
+                            }
                         }
                     }
                 }
             }
             
-            const entitySet = new Set();
-            const uniqueEntities = [];
-            
-            for (const entity of entities) {
-                const key = `${entity.type}-${entity.value}`;
-                if (!entitySet.has(key)) {
-                    entitySet.add(key);
-                    uniqueEntities.push(entity);
-                }
-            }
-            
-            return uniqueEntities;
+            return entities;
         }
 
         async function recognizeText() {
@@ -999,7 +1026,6 @@
                     }
                 } else {
                     entities = knowledgeBasedNer(text);
-                    entities = addAllPossibleTypes(entities);
                     entities = removeInvalidSingleChars(entities);
                     entities = deduplicateByContext(entities, text);
                     if (textMode === 'document') {
@@ -1050,22 +1076,78 @@
                 aiBadge.style.display = 'inline-block';
             }
 
-            let highlighted = text;
+            const usedPositions = new Set();
+            const entitySpans = [];
             const sortedEntities = [...entities].sort((a, b) => b.value.length - a.value.length);
             
             for (const entity of sortedEntities) {
-                const color = entityColors[entity.type] || '#FFFF00';
-                const escapedValue = entity.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                highlighted = highlighted.replace(
-                    new RegExp(escapedValue, 'g'),
-                    `<mark style="background-color: ${color}; padding: 2px 4px; border-radius: 3px;">${entity.value}</mark>`
-                );
+                let start = 0;
+                while (true) {
+                    const idx = text.indexOf(entity.value, start);
+                    if (idx === -1) break;
+                    
+                    let isBlocked = false;
+                    for (let i = idx; i < idx + entity.value.length; i++) {
+                        if (usedPositions.has(i)) {
+                            isBlocked = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!isBlocked) {
+                        let isPartOfLonger = false;
+                        for (const existing of entitySpans) {
+                            if (existing.start <= idx && existing.start + existing.length >= idx + entity.value.length) {
+                                isPartOfLonger = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!isPartOfLonger) {
+                            for (let i = idx; i < idx + entity.value.length; i++) {
+                                usedPositions.add(i);
+                            }
+                            entitySpans.push({
+                                start: idx,
+                                length: entity.value.length,
+                                type: entity.type,
+                                value: entity.value
+                            });
+                        }
+                    }
+                    
+                    start = idx + 1;
+                }
+            }
+            
+            entitySpans.sort((a, b) => a.start - b.start);
+            
+            let highlighted = '';
+            let lastEnd = 0;
+            
+            for (const span of entitySpans) {
+                if (span.start > lastEnd) {
+                    highlighted += text.substring(lastEnd, span.start);
+                }
+                const color = entityColors[span.type] || '#FFFF00';
+                highlighted += `<mark style="background-color: ${color}; padding: 2px 4px; border-radius: 3px;">${span.value}</mark>`;
+                lastEnd = span.start + span.length;
+            }
+            
+            if (lastEnd < text.length) {
+                highlighted += text.substring(lastEnd);
             }
             
             highlightedText.innerHTML = highlighted;
 
             entitiesGrid.innerHTML = '';
+            const seenEntities = new Set();
+            
             entities.forEach(entity => {
+                const key = `${entity.value}-${entity.type}`;
+                if (seenEntities.has(key)) return;
+                seenEntities.add(key);
+                
                 const card = document.createElement('div');
                 card.className = 'entity-card';
                 card.innerHTML = `
@@ -1077,7 +1159,7 @@
                 entitiesGrid.appendChild(card);
             });
 
-            statTotal.textContent = entities.length;
+            statTotal.textContent = seenEntities.size;
             const uniqueTypes = new Set(entities.map(e => e.type)).size;
             statTypes.textContent = uniqueTypes;
             statSentences.textContent = processedSentences || 0;
@@ -1120,8 +1202,53 @@
             if (!file) return;
 
             const errorMessage = document.getElementById('error-message');
+            const aiMode = document.querySelector('input[name="ai-mode"]:checked').value;
+            const useAi = document.getElementById('use-ai-checkbox').checked;
+            const submitBtn = document.getElementById('submit-btn');
             
             try {
+                if (file.name.toLowerCase().endsWith('.docx')) {
+                    if (aiMode !== 'api') {
+                        errorMessage.textContent = 'docx格式需要在后端处理，请切换到"后端API"模式';
+                        errorMessage.style.display = 'block';
+                        event.target.value = '';
+                        return;
+                    }
+                    
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<span class="loading"></span><span>上传并识别中...</span>';
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('use_ai', useAi);
+                    
+                    const response = await fetch('/api/ner/file', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('文件上传失败');
+                    }
+                    
+                    const data = await response.json();
+                    const text = data.text || '';
+                    
+                    displayResults(text, data.entities, data.used_ai, data.processed_sentences);
+                    document.getElementById('input-text').value = text;
+                    
+                    if (data.used_ai) {
+                        document.getElementById('ai-badge').style.display = 'inline-block';
+                    }
+                    document.getElementById('doc-badge').style.display = 'inline-block';
+                    
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<span>开始识别</span>';
+                    errorMessage.style.display = 'none';
+                    event.target.value = '';
+                    return;
+                }
+                
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const content = e.target.result;
@@ -1129,17 +1256,13 @@
                     errorMessage.style.display = 'none';
                 };
                 
-                if (file.name.endsWith('.docx')) {
-                    errorMessage.textContent = 'docx格式需要在后端处理，请上传txt或md文件';
-                    errorMessage.style.display = 'block';
-                    event.target.value = '';
-                    return;
-                }
-                
                 reader.readAsText(file, 'utf-8');
             } catch (error) {
-                errorMessage.textContent = '文件读取失败: ' + error.message;
+                errorMessage.textContent = '文件处理失败: ' + error.message;
                 errorMessage.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>开始识别</span>';
+                event.target.value = '';
             }
         }
 
